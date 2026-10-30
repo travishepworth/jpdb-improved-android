@@ -167,6 +167,8 @@ class RepositoryTest {
         assertEquals("魚", core.state.value.content["4,40"]?.spelling)
         assertEquals(listOf("LHH"), core.state.value.content["4,40"]?.pitch)
         assertTrue("chunk halved below the server limit", config.config.value.chunk <= 3)
+        assertEquals(listOf("Deck 7", "Deck 8"), core.state.value.decks["3,30"])
+        assertEquals(listOf("Deck 8"), core.state.value.decks["4,40"])
 
         // review while offline -> outbox persists
         online = false
@@ -186,6 +188,7 @@ class RepositoryTest {
         // "app killed": new repository from the same store
         core = repo()
         core.ensureLoaded()
+        assertEquals("deck names restored from cache", listOf("Deck 8"), core.state.value.decks["4,40"])
         assertEquals(1, core.state.value.outbox)
         assertEquals(2, core.state.value.queue.size)
 

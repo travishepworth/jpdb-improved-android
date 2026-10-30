@@ -40,6 +40,8 @@ data class RepoState(
     val lastSync: Long = 0,
     /** Outbox grades dropped because the card had already been reviewed elsewhere (e.g. on the website). */
     val skipped: Int = 0,
+    /** Card key ("vid,sid") -> names of the user's decks containing it. */
+    val decks: Map<String, List<String>> = emptyMap(),
 )
 
 /**
@@ -78,7 +80,8 @@ class JpdbRepository(
             val outbox = store.loadOutbox()
             val content = store.loadContent(queue.map { it.key })
             val lastSync = store.getKv(KV_LAST_SYNC)?.toLongOrNull() ?: 0
-            _state.update { it.copy(loaded = true, queue = queue, content = content, outbox = outbox.size, lastSync = lastSync) }
+            val decks = loadDeckCache()?.let(::deckNamesByCard) ?: emptyMap()
+            _state.update { it.copy(loaded = true, queue = queue, content = content, outbox = outbox.size, lastSync = lastSync, decks = decks) }
         }
     }
 
@@ -160,19 +163,36 @@ class JpdbRepository(
     }
 
     @Serializable
-    private data class PairsCache(val t: Long, val pairs: List<List<Long>>)
+    private data class Deck(val id: Long, val name: String, val pairs: List<List<Long>>)
 
+    @Serializable
+    private data class DeckCache(val t: Long, val decks: List<Deck>)
+
+    private suspend fun loadDeckCache() =
+        store.getKv(KV_DECKS)?.let { runCatching { json.decodeFromString<DeckCache>(it) }.getOrNull() }
+
+    private fun deckNamesByCard(cache: DeckCache): Map<String, List<String>> {
+        val out = LinkedHashMap<String, MutableList<String>>()
+        for (deck in cache.decks) for (p in deck.pairs) out.getOrPut("${p[0]},${p[1]}") { mutableListOf() } += deck.name
+        return out
+    }
+
+    /** Every (vid, sid) in the user's decks, deduplicated. Also refreshes the card -> deck names map. */
     private suspend fun allPairs(key: String, force: Boolean): List<Pair<Long, Long>> {
-        val cached = store.getKv(KV_PAIRS)?.let { runCatching { json.decodeFromString<PairsCache>(it) }.getOrNull() }
-        if (!force && cached != null && now() - cached.t < config.deckTtlHours * 3_600_000L) {
-            return cached.pairs.map { it[0] to it[1] }
-        }
+        val cached = loadDeckCache()
+        val cache = if (!force && cached != null && now() - cached.t < config.deckTtlHours * 3_600_000L) cached
+        else fetchDecks(key).also { store.putKv(KV_DECKS, json.encodeToString(it)) }
+        val names = deckNamesByCard(cache)
+        _state.update { it.copy(decks = names) }
+        return names.keys.map { k -> k.split(',').let { it[0].toLong() to it[1].toLong() } }
+    }
+
+    private suspend fun fetchDecks(key: String): DeckCache {
         progress("listing decks")
         val decks = api.call("list-user-decks", key, buildJsonObject {
             put("fields", JsonArray(listOf(JsonPrimitive("id"), JsonPrimitive("name"))))
         })["decks"] as? JsonArray ?: JsonArray(emptyList())
-        val seen = HashSet<String>()
-        val pairs = ArrayList<Pair<Long, Long>>()
+        val out = ArrayList<Deck>()
         for (deck in decks) {
             val (id, name) = when (deck) {
                 is JsonArray -> deck.getOrNull(0).long() to deck.getOrNull(1).str()
@@ -182,16 +202,14 @@ class JpdbRepository(
             if (id == null) continue
             progress("reading deck “${name ?: id}”")
             val d = api.call("deck/list-vocabulary", key, buildJsonObject { put("id", id); put("fetch_occurences", false) })
-            for (p in d["vocabulary"] as? JsonArray ?: JsonArray(emptyList())) {
-                val a = p as? JsonArray ?: continue
-                val vid = a.getOrNull(0).long() ?: continue
-                val sid = a.getOrNull(1).long() ?: continue
-                if (seen.add("$vid,$sid")) pairs += vid to sid
+            val pairs = (d["vocabulary"] as? JsonArray ?: JsonArray(emptyList())).mapNotNull { p ->
+                val a = p as? JsonArray ?: return@mapNotNull null
+                listOf(a.getOrNull(0).long() ?: return@mapNotNull null, a.getOrNull(1).long() ?: return@mapNotNull null)
             }
+            out += Deck(id, name ?: "Deck $id", pairs)
             sleep(API_GAP_MS)
         }
-        store.putKv(KV_PAIRS, json.encodeToString(PairsCache(now(), pairs.map { listOf(it.first, it.second) })))
-        return pairs
+        return DeckCache(now(), out)
     }
 
     private suspend fun lookup(key: String, pairs: List<Pair<Long, Long>>, fields: List<String>): List<JsonArray?> {
@@ -349,7 +367,7 @@ class JpdbRepository(
         val page = api.getReviewPage(item.vid, item.sid)
         if (page.isLogin) throw AuthError(LOGIN_MSG)
         val r = parseReviewNo(page.html)
-        detectGradeMode(page.html)?.let { m -> if (m != config.mode) settings.update { it.copy(mode = m) } }
+        if (!config.modeChosen) detectGradeMode(page.html)?.let { m -> if (m != config.mode) settings.update { it.copy(mode = m) } }
         // If a previous POST went through but we lost the response, the review number moved on: don't double-grade.
         if (item.r != null && r > item.r) return
         store.updateOutbox(item.copy(r = r, inFlight = true))
@@ -370,7 +388,7 @@ class JpdbRepository(
         const val API_GAP_MS = 200L
         const val SCRAPE_GAP_MS = 1100L
         private const val KV_LAST_SYNC = "lastSync"
-        private const val KV_PAIRS = "pairs"
+        private const val KV_DECKS = "decks"
         private const val LOGIN_MSG = "Not logged in to jpdb.io — log in on the website in this app, then uploads resume."
         private val json = Json { ignoreUnknownKeys = true }
 

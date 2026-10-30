@@ -28,9 +28,13 @@ fun JpdbTheme(content: @Composable () -> Unit) {
 /** Japanese locale so Han characters use Japanese glyph forms rather than Chinese ones. */
 val JapaneseText = TextStyle(localeList = LocaleList("ja"))
 
-/** Material has no "success" role; these tint the Pass buttons. */
-@Composable
-fun passContainer() = if (isSystemInDarkTheme()) Color(0xFF1F4D2C) else Color(0xFFCDEFD5)
+/** jpdb's grade colours: red for failing grades, then orange (hard), green (okay/pass), blue (easy). */
+enum class GradeColor(private val light: Long, private val dark: Long) {
+    Red(0xFFD7443A, 0xFFB3362E),
+    Orange(0xFFE5841A, 0xFFB86512),
+    Green(0xFF3A9A4E, 0xFF2E7D3F),
+    Blue(0xFF3B7BDB, 0xFF2F63B3);
 
-@Composable
-fun onPassContainer() = if (isSystemInDarkTheme()) Color(0xFFC8F0D1) else Color(0xFF0B3A18)
+    @Composable
+    fun color() = Color(if (isSystemInDarkTheme()) dark else light)
+}

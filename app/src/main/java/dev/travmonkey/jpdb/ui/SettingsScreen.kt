@@ -77,7 +77,7 @@ fun SettingsScreen(vm: MainViewModel) {
             Text("Grading buttons (match your jpdb setting)", style = MaterialTheme.typography.titleSmall)
             listOf(GradeMode.PassFail to "Pass / Fail", GradeMode.Five to "5 grades (Nothing … Easy)").forEach { (mode, label) ->
                 Row(
-                    Modifier.fillMaxWidth().selectable(selected = cfg.mode == mode, onClick = { vm.updateConfig { it.copy(mode = mode) } }),
+                    Modifier.fillMaxWidth().selectable(selected = cfg.mode == mode, onClick = { vm.updateConfig { it.copy(mode = mode, modeChosen = true) } }),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(selected = cfg.mode == mode, onClick = null)

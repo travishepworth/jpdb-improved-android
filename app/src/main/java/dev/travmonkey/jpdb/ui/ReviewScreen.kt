@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -108,7 +109,7 @@ fun ReviewScreen(vm: MainViewModel) {
             contentAlignment = Alignment.Center,
         ) {
             if (card == null) EmptyState(s, online, onSync = { vm.sync() })
-            else CardFace(card, s.content[card.key], revealed, s.error)
+            else CardFace(card, s.content[card.key], s.decks[card.key].orEmpty(), revealed, s.error)
         }
     }
 }
@@ -123,7 +124,7 @@ private fun statusLabel(net: Net, pending: Int): String {
 }
 
 @Composable
-private fun CardFace(card: Card, ct: CardContent?, revealed: Boolean, error: String?) {
+private fun CardFace(card: Card, ct: CardContent?, decks: List<String>, revealed: Boolean, error: String?) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -149,6 +150,15 @@ private fun CardFace(card: Card, ct: CardContent?, revealed: Boolean, error: Str
             }
             val meta = listOfNotNull(if (card.state == "failed") "previously failed" else null, ct.freq?.let { "top $it" }).joinToString(" · ")
             if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
+            if (decks.isNotEmpty()) {
+                Text(
+                    (if (decks.size == 1) "Deck: " else "Decks: ") + decks.joinToString(", "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
         if (error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 16.dp))
     }
@@ -189,20 +199,29 @@ private fun EmptyState(s: RepoState, online: Boolean, onSync: () -> Unit) {
 @Composable
 private fun GradeBar(revealed: Boolean, mode: GradeMode, onReveal: () -> Unit, onGrade: (String) -> Unit) {
     Surface(tonalElevation = 3.dp) {
-        Row(
+        Column(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            val tall = Modifier.height(60.dp)
+            val row = Modifier.fillMaxWidth().height(56.dp)
+            val gap = Arrangement.spacedBy(8.dp)
             when {
-                !revealed -> Button(onClick = onReveal, modifier = tall.weight(1f)) { Text("Show answer", fontSize = 17.sp) }
-                mode == GradeMode.Five -> listOf("nothing" to "Nothing", "something" to "Something", "hard" to "Hard", "okay" to "Okay", "easy" to "Easy")
-                    .forEachIndexed { i, (g, label) ->
-                        GradeButton(label, fail = i < 2, small = true, modifier = tall.weight(1f)) { onGrade(g) }
+                !revealed -> Button(onClick = onReveal, modifier = row) { Text("Show answer", fontSize = 17.sp) }
+                // Same layout as jpdb: the two failing grades on top, the three passing ones below.
+                mode == GradeMode.Five -> {
+                    Row(row, horizontalArrangement = gap) {
+                        GradeButton("Nothing", GradeColor.Red, Modifier.weight(1f)) { onGrade("nothing") }
+                        GradeButton("Something", GradeColor.Red, Modifier.weight(1f)) { onGrade("something") }
                     }
-                else -> {
-                    GradeButton("✘ Fail", fail = true, modifier = tall.weight(1f)) { onGrade("fail") }
-                    GradeButton("✔ Pass", fail = false, modifier = tall.weight(1f)) { onGrade("pass") }
+                    Row(row, horizontalArrangement = gap) {
+                        GradeButton("Hard", GradeColor.Orange, Modifier.weight(1f)) { onGrade("hard") }
+                        GradeButton("Okay", GradeColor.Green, Modifier.weight(1f)) { onGrade("okay") }
+                        GradeButton("Easy", GradeColor.Blue, Modifier.weight(1f)) { onGrade("easy") }
+                    }
+                }
+                else -> Row(row, horizontalArrangement = gap) {
+                    GradeButton("✘ Fail", GradeColor.Red, Modifier.weight(1f)) { onGrade("fail") }
+                    GradeButton("✔ Pass", GradeColor.Green, Modifier.weight(1f)) { onGrade("pass") }
                 }
             }
         }
@@ -210,18 +229,13 @@ private fun GradeBar(revealed: Boolean, mode: GradeMode, onReveal: () -> Unit, o
 }
 
 @Composable
-private fun GradeButton(label: String, fail: Boolean, modifier: Modifier, small: Boolean = false, onClick: () -> Unit) {
-    val colors = if (fail) {
-        ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
-    } else {
-        ButtonDefaults.buttonColors(containerColor = passContainer(), contentColor = onPassContainer())
-    }
+private fun GradeButton(label: String, color: GradeColor, modifier: Modifier, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        colors = colors,
-        modifier = modifier,
-        contentPadding = if (small) ButtonDefaults.TextButtonContentPadding else ButtonDefaults.ContentPadding,
+        colors = ButtonDefaults.buttonColors(containerColor = color.color(), contentColor = Color.White),
+        modifier = modifier.fillMaxHeight(),
+        contentPadding = ButtonDefaults.TextButtonContentPadding,
     ) {
-        Text(label, fontSize = if (small) 13.sp else 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, color = Color.Unspecified)
+        Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }

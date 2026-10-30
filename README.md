@@ -7,7 +7,8 @@ It shows the real jpdb.io website. In the background it keeps a copy of your due
 ## Features
 - **The real website:** jpdb.io runs in a full-screen WebView with your normal login. Everything on the site works as usual.
 - **Offline review:**
-  - A native review screen with pitch-accent readings, meanings, Pass/Fail or 5-grade buttons, and undo.
+  - A native review screen with pitch-accent readings, meanings, frequency rank, which of your decks the word is in, and undo.
+  - jpdb's 5 grade buttons, laid out and coloured like on the site: red Nothing/Something on top, then orange Hard, green Okay and blue Easy. Pass/Fail is available in Settings.
   - Japanese text uses Japanese kanji shapes rather than Chinese ones.
 - **Switches when the connection is bad:**
   - With no connection at all, the app opens offline review straight away.

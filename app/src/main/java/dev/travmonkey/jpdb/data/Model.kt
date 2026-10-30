@@ -40,7 +40,9 @@ enum class GradeMode { PassFail, Five }
 @Serializable
 data class Config(
     val apiKey: String = "",
-    val mode: GradeMode = GradeMode.PassFail,
+    val mode: GradeMode = GradeMode.Five,
+    /** Set once the user picks a mode in Settings; auto-detection then leaves it alone. */
+    val modeChosen: Boolean = false,
     val deckTtlHours: Int = 12,
     val slowMs: Long = 3000,
     val syncHours: Int = 2,
