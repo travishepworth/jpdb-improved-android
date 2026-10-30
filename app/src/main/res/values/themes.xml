@@ -1,0 +1,8 @@
+<resources>
+    <!-- Light parent sets isLightTheme=true, which the WebView reports as prefers-color-scheme: light. -->
+    <style name="Theme.Jpdb" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_bg</item>
+    </style>
+    <color name="window_bg">#FFF6F6F6</color>
+    <color name="icon_bg">#FF4B8DFF</color>
+</resources>
