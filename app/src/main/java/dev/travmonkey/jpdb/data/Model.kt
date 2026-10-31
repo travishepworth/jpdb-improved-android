@@ -35,6 +35,12 @@ data class OutboxItem(
     val key get() = "$vid,$sid"
 }
 
+/** One of the user's decks and the (vid, sid) pairs in it. */
+data class Deck(val id: Long, val name: String, val pairs: List<Pair<Long, Long>>)
+
+/** The user's deck list as of [t] (ms). */
+data class DeckCache(val t: Long, val decks: List<Deck>)
+
 enum class GradeMode { PassFail, Five }
 
 @Serializable
@@ -80,6 +86,10 @@ interface Store {
 
     suspend fun loadContent(keys: Collection<String>): Map<String, CardContent>
     suspend fun saveContent(content: Map<String, CardContent>)
+
+    /** Deck membership is stored row-per-card: one blob of it can outgrow SQLite's ~2 MB cursor window. */
+    suspend fun loadDecks(): DeckCache?
+    suspend fun saveDecks(cache: DeckCache)
 
     suspend fun getKv(key: String): String?
     suspend fun putKv(key: String, value: String)

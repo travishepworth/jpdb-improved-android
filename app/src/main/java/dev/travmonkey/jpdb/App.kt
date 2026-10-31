@@ -13,6 +13,8 @@ import dev.travmonkey.jpdb.net.Connectivity
 import dev.travmonkey.jpdb.net.WebViewCookieJar
 import dev.travmonkey.jpdb.work.OutboxWorker
 import dev.travmonkey.jpdb.work.SyncWorker
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,7 +28,8 @@ class App : Application() {
     lateinit var configStore: PrefsConfigStore
     lateinit var connectivity: Connectivity
     lateinit var repo: JpdbRepository
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // A failed background job must never take the whole app down with it.
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> Log.e("jpdb", "background job failed", e) })
 
     private val kicks = Channel<Unit>(Channel.CONFLATED)
 
@@ -77,7 +80,15 @@ class App : Application() {
     private suspend fun flushLoop() {
         var backoff = 2000L
         while (true) {
-            when (repo.flush()) {
+            val result = try {
+                repo.flush()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("jpdb", "flush failed", e)
+                FlushResult.Retry
+            }
+            when (result) {
                 FlushResult.Done, FlushResult.Offline, FlushResult.Auth -> return
                 FlushResult.Retry -> {
                     // a new kick (e.g. network came back) retries right away

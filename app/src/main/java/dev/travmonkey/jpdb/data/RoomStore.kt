@@ -11,7 +11,9 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.room.migration.Migration
 import androidx.room.withTransaction
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -37,6 +39,12 @@ data class ContentRow(@PrimaryKey val cardKey: String, val json: String)
 @Entity(tableName = "kv")
 data class KvRow(@PrimaryKey val k: String, val v: String)
 
+@Entity(tableName = "deck")
+data class DeckRow(@PrimaryKey val id: Long, val name: String, val pos: Int)
+
+@Entity(tableName = "deck_card", primaryKeys = ["deckId", "vid", "sid"])
+data class DeckCardRow(val deckId: Long, val vid: Long, val sid: Long)
+
 @Dao
 interface JpdbDao {
     @Query("SELECT * FROM queue ORDER BY pos") suspend fun queue(): List<QueueRow>
@@ -56,16 +64,41 @@ interface JpdbDao {
     @Query("SELECT * FROM content WHERE cardKey IN (:keys)") suspend fun content(keys: List<String>): List<ContentRow>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertContent(rows: List<ContentRow>)
 
+    @Query("SELECT * FROM deck ORDER BY pos") suspend fun decks(): List<DeckRow>
+    @Query("SELECT * FROM deck_card") suspend fun deckCards(): List<DeckCardRow>
+    @Query("DELETE FROM deck") suspend fun clearDecks()
+    @Query("DELETE FROM deck_card") suspend fun clearDeckCards()
+    @Insert suspend fun insertDecks(rows: List<DeckRow>)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertDeckCards(rows: List<DeckCardRow>)
+
     @Query("SELECT v FROM kv WHERE k = :k") suspend fun kv(k: String): String?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putKv(row: KvRow)
 }
 
-@Database(entities = [QueueRow::class, OutboxRow::class, ContentRow::class, KvRow::class], version = 1, exportSchema = false)
+@Database(
+    entities = [QueueRow::class, OutboxRow::class, ContentRow::class, KvRow::class, DeckRow::class, DeckCardRow::class],
+    version = 2,
+    exportSchema = false,
+)
 abstract class JpdbDb : RoomDatabase() {
     abstract fun dao(): JpdbDao
 
     companion object {
-        fun open(context: Context) = Room.databaseBuilder(context, JpdbDb::class.java, "jpdb.db").build()
+        /** v1 kept every deck's card list in one kv row, which grew past the cursor window and crashed on read. */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DELETE FROM kv WHERE k = 'decks'")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `deck` (`id` INTEGER NOT NULL, `name` TEXT NOT NULL, `pos` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `deck_card` (`deckId` INTEGER NOT NULL, `vid` INTEGER NOT NULL, `sid` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`deckId`, `vid`, `sid`))"
+                )
+            }
+        }
+
+        fun open(context: Context) = Room.databaseBuilder(context, JpdbDb::class.java, "jpdb.db")
+            .addMigrations(MIGRATION_1_2)
+            .build()
     }
 }
 
@@ -106,8 +139,26 @@ class RoomStore(private val db: JpdbDb) : Store {
     override suspend fun saveContent(content: Map<String, CardContent>) =
         dao.insertContent(content.map { (k, v) -> ContentRow(k, json.encodeToString(v)) })
 
+    override suspend fun loadDecks(): DeckCache? {
+        val t = dao.kv(KV_DECKS_AT)?.toLongOrNull() ?: return null
+        val pairs = dao.deckCards().groupBy({ it.deckId }, { it.vid to it.sid })
+        return DeckCache(t, dao.decks().map { Deck(it.id, it.name, pairs[it.id].orEmpty()) })
+    }
+
+    override suspend fun saveDecks(cache: DeckCache) = db.withTransaction {
+        dao.clearDecks()
+        dao.clearDeckCards()
+        dao.insertDecks(cache.decks.mapIndexed { i, d -> DeckRow(d.id, d.name, i) })
+        for (d in cache.decks) dao.insertDeckCards(d.pairs.map { (vid, sid) -> DeckCardRow(d.id, vid, sid) })
+        dao.putKv(KvRow(KV_DECKS_AT, cache.t.toString()))
+    }
+
     override suspend fun getKv(key: String) = dao.kv(key)
     override suspend fun putKv(key: String, value: String) = dao.putKv(KvRow(key, value))
+
+    private companion object {
+        const val KV_DECKS_AT = "decksAt"
+    }
 
     private fun Card.toRow(pos: Int) = QueueRow(key, vid, sid, state, dueAt, pos)
     private fun OutboxItem.toRow() = OutboxRow(id, vid, sid, grade, t, r, tries, inFlight)

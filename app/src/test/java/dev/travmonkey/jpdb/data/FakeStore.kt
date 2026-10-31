@@ -9,6 +9,7 @@ class FakeStore : Store {
     private val outbox = mutableListOf<OutboxItem>()
     private val content = HashMap<String, CardContent>()
     private val kv = HashMap<String, String>()
+    private var decks: DeckCache? = null
     private var nextId = 1L
 
     override suspend fun loadQueue() = lock.withLock { queue }
@@ -41,6 +42,8 @@ class FakeStore : Store {
     }
     override suspend fun loadContent(keys: Collection<String>) = lock.withLock { keys.mapNotNull { k -> content[k]?.let { k to it } }.toMap() }
     override suspend fun saveContent(content: Map<String, CardContent>) { lock.withLock { this.content.putAll(content) } }
+    override suspend fun loadDecks() = lock.withLock { decks }
+    override suspend fun saveDecks(cache: DeckCache) { lock.withLock { decks = cache } }
     override suspend fun getKv(key: String) = lock.withLock { kv[key] }
     override suspend fun putKv(key: String, value: String) { lock.withLock { kv[key] = value } }
 }

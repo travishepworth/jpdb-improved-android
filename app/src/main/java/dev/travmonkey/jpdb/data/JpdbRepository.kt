@@ -9,10 +9,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -162,18 +158,11 @@ class JpdbRepository(
         )
     }
 
-    @Serializable
-    private data class Deck(val id: Long, val name: String, val pairs: List<List<Long>>)
-
-    @Serializable
-    private data class DeckCache(val t: Long, val decks: List<Deck>)
-
-    private suspend fun loadDeckCache() =
-        store.getKv(KV_DECKS)?.let { runCatching { json.decodeFromString<DeckCache>(it) }.getOrNull() }
+    private suspend fun loadDeckCache() = store.loadDecks()
 
     private fun deckNamesByCard(cache: DeckCache): Map<String, List<String>> {
         val out = LinkedHashMap<String, MutableList<String>>()
-        for (deck in cache.decks) for (p in deck.pairs) out.getOrPut("${p[0]},${p[1]}") { mutableListOf() } += deck.name
+        for (deck in cache.decks) for ((vid, sid) in deck.pairs) out.getOrPut("$vid,$sid") { mutableListOf() } += deck.name
         return out
     }
 
@@ -181,7 +170,7 @@ class JpdbRepository(
     private suspend fun allPairs(key: String, force: Boolean): List<Pair<Long, Long>> {
         val cached = loadDeckCache()
         val cache = if (!force && cached != null && now() - cached.t < config.deckTtlHours * 3_600_000L) cached
-        else fetchDecks(key).also { store.putKv(KV_DECKS, json.encodeToString(it)) }
+        else fetchDecks(key).also { store.saveDecks(it) }
         val names = deckNamesByCard(cache)
         _state.update { it.copy(decks = names) }
         return names.keys.map { k -> k.split(',').let { it[0].toLong() to it[1].toLong() } }
@@ -204,7 +193,7 @@ class JpdbRepository(
             val d = api.call("deck/list-vocabulary", key, buildJsonObject { put("id", id); put("fetch_occurences", false) })
             val pairs = (d["vocabulary"] as? JsonArray ?: JsonArray(emptyList())).mapNotNull { p ->
                 val a = p as? JsonArray ?: return@mapNotNull null
-                listOf(a.getOrNull(0).long() ?: return@mapNotNull null, a.getOrNull(1).long() ?: return@mapNotNull null)
+                (a.getOrNull(0).long() ?: return@mapNotNull null) to (a.getOrNull(1).long() ?: return@mapNotNull null)
             }
             out += Deck(id, name ?: "Deck $id", pairs)
             sleep(API_GAP_MS)
@@ -388,9 +377,7 @@ class JpdbRepository(
         const val API_GAP_MS = 200L
         const val SCRAPE_GAP_MS = 1100L
         private const val KV_LAST_SYNC = "lastSync"
-        private const val KV_DECKS = "decks"
         private const val LOGIN_MSG = "Not logged in to jpdb.io — log in on the website in this app, then uploads resume."
-        private val json = Json { ignoreUnknownKeys = true }
 
         /** card_state is e.g. ["due"], ["failed"], ["redundant","due"], ["locked","due"]. */
         fun isReviewable(st: List<String>) = st.size == 1 && (st[0] == "due" || st[0] == "failed")

@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -43,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.travmonkey.jpdb.data.Card
@@ -60,7 +62,8 @@ fun ReviewScreen(vm: MainViewModel) {
     val card = s.queue.firstOrNull()
     val revealed = card != null && vm.revealedKey == card.key
 
-    BackHandler { vm.openWeb() }
+    // Back (gesture or button) undoes the last grade; with nothing to undo it returns to the website.
+    BackHandler { if (s.canUndo) vm.undo() else vm.openWeb() }
 
     Scaffold(
         topBar = {
@@ -125,42 +128,45 @@ private fun statusLabel(net: Net, pending: Int): String {
 
 @Composable
 private fun CardFace(card: Card, ct: CardContent?, decks: List<String>, revealed: Boolean, error: String?) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(ct?.spelling ?: "?", style = JapaneseText.copy(fontSize = 60.sp, fontWeight = FontWeight.Medium), textAlign = TextAlign.Center)
-        if (!revealed) {
-            Text("tap to reveal", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp))
-        } else if (ct != null) {
-            if ((ct.reading != null && ct.reading != ct.spelling) || ct.pitch.isNotEmpty()) {
-                PitchReading(ct.reading ?: ct.spelling, ct.pitch, Modifier.padding(top = 6.dp))
-            }
-            Column(Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(top = 18.dp)) {
-                ct.meanings.forEachIndexed { i, m ->
-                    HorizontalDivider()
-                    Column(Modifier.padding(vertical = 8.dp)) {
-                        if (i == 0 && ct.pos.isNotEmpty()) {
-                            Text(ct.pos.joinToString(", "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // The word sits about a quarter of the way down; the answer flows below it and scrolls if long.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val top = (maxHeight / 4 - 44.dp).coerceAtLeast(16.dp)
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = top, bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(ct?.spelling ?: "?", style = JapaneseText.copy(fontSize = 60.sp, fontWeight = FontWeight.Medium), textAlign = TextAlign.Center)
+            if (!revealed) {
+                Text("tap to reveal", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp))
+            } else if (ct != null) {
+                if ((ct.reading != null && ct.reading != ct.spelling) || ct.pitch.isNotEmpty()) {
+                    PitchReading(ct.reading ?: ct.spelling, ct.pitch, Modifier.padding(top = 6.dp))
+                }
+                Column(Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(top = 18.dp)) {
+                    ct.meanings.forEachIndexed { i, m ->
+                        HorizontalDivider()
+                        Column(Modifier.padding(vertical = 8.dp)) {
+                            if (i == 0 && ct.pos.isNotEmpty()) {
+                                Text(ct.pos.joinToString(", "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text("${i + 1}. $m", style = MaterialTheme.typography.bodyLarge)
                         }
-                        Text("${i + 1}. $m", style = MaterialTheme.typography.bodyLarge)
                     }
                 }
+                val meta = listOfNotNull(if (card.state == "failed") "previously failed" else null, ct.freq?.let { "top $it" }).joinToString(" · ")
+                if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
+                if (decks.isNotEmpty()) {
+                    Text(
+                        (if (decks.size == 1) "Deck: " else "Decks: ") + decks.joinToString(", "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
-            val meta = listOfNotNull(if (card.state == "failed") "previously failed" else null, ct.freq?.let { "top $it" }).joinToString(" · ")
-            if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
-            if (decks.isNotEmpty()) {
-                Text(
-                    (if (decks.size == 1) "Deck: " else "Decks: ") + decks.joinToString(", "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
+            if (error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 16.dp))
         }
-        if (error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 16.dp))
     }
 }
 
